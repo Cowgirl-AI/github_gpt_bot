@@ -12,7 +12,7 @@ def read_requirements():
     return []
 
 setup(
-    name="cowgirl-ai-github-bot",
+    name="cgai-gh-bot",
     version="0.0.1",
     description="Cowgirl AI Github GPT Bot",
     long_description=open("README.md").read(),
@@ -26,6 +26,7 @@ setup(
     python_requires=">=3.10",
     entry_points={
         "console_scripts": [
+            # command=folder.script_name.main       # example
             "cgai-gh=cli.main:main",
         ],
     },

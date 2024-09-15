@@ -10,5 +10,6 @@ dist
 
 node_modules/
 build/
+.env
 
 # temporary or under development:
