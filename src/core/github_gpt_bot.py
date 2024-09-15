@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 class CodeImprover:
     def __init__(self, repo_name):
         load_dotenv()
-        self.github_token = "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"
+        self.github_token = os.getenv('GITHUB_TOKEN')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.repo_name = repo_name
 
