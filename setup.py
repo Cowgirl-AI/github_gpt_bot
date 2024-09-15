@@ -12,22 +12,21 @@ def read_requirements():
     return []
 
 setup(
-    name="cowgirl-ai-template",
+    name="cowgirl-ai-github-bot",
     version="0.0.1",
-    description="Cowgirl AI - Core Assistant",
+    description="Cowgirl AI Github GPT Bot",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/Cowgirl-AI/core",
+    url="https://github.com/Cowgirl-AI/github_gpt_bot",
     author="Tera Earlywine",
-    author_email="dev@teraearlywine.com",
-    # license='MIT',
+    author_email="tera@cowgirlai.tech",
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     install_requires=read_requirements(),
     python_requires=">=3.10",
     entry_points={
         "console_scripts": [
-            "cowgirl-ai-template=cli.main:main",
+            "cgai-gh=cli.main:main",
         ],
     },
     include_package_data=True,

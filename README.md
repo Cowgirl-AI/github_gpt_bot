@@ -1,1 +1,1 @@
-# TEMPLATE REPOSITORY 
+# Github GPT Bot
