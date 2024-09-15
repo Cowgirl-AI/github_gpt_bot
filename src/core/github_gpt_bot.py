@@ -1,3 +1,4 @@
+```python
 from dotenv import load_dotenv
 from github import Github, InputGitTreeElement, GithubException
 import os
@@ -17,38 +18,43 @@ class CodeImprover:
         self.repo_name = repo_name
 
         # Validate environment variables
-        assert self.github_token, "GITHUB_TOKEN must be set as an environment variable."
-        assert self.openai_api_key, "OPENAI_API_KEY must be set as an environment variable."
+        self._validate_env_variables()
 
         # Authenticate with GitHub
         self.github = Github(self.github_token)
-        self.repo = self.authenticate_repo()
+        self.repo = self._authenticate_repo()
 
         # Authenticate with OpenAI
         openai.api_key = self.openai_api_key
 
-    def authenticate_repo(self):
+    def _validate_env_variables(self):
+        if not self.github_token:
+            raise ValueError("GITHUB_TOKEN must be set as an environment variable.")
+        if not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY must be set as an environment variable.")
+
+    def _authenticate_repo(self):
         try:
             repo = self.github.get_repo(self.repo_name)
             logging.info(f"Authenticated to repository: {repo.full_name}")
             return repo
         except GithubException as e:
-            if e.status == 401:
-                logging.error("Authentication failed: Bad credentials. Please check your GITHUB_TOKEN.")
-            elif e.status == 403:
-                logging.error("Access forbidden: You do not have the necessary permissions.")
-            elif e.status == 404:
-                logging.error("Repository not found: Please check the repository name and your permissions.")
-            else:
-                logging.error(f"An error occurred: {e.data['message']}")
-            raise
+            self._handle_github_exception(e)
 
+    def _handle_github_exception(self, exception):
+        error_messages = {
+            401: "Authentication failed: Bad credentials. Please check your GITHUB_TOKEN.",
+            403: "Access forbidden: You do not have the necessary permissions.",
+            404: "Repository not found: Please check the repository name and your permissions."
+        }
+        logging.error(error_messages.get(exception.status, f"An error occurred: {exception.data['message']}"))
+        raise
 
     def create_branch(self):
         default_branch = self.repo.default_branch
         new_branch_name = f'code-improvements-{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}'
         sb = self.repo.get_branch(default_branch)
-        self.repo.create_git_ref(ref='refs/heads/' + new_branch_name, sha=sb.commit.sha)
+        self.repo.create_git_ref(ref=f'refs/heads/{new_branch_name}', sha=sb.commit.sha)
         return new_branch_name, sb
 
     def improve_code(self, code):
@@ -56,8 +62,14 @@ class CodeImprover:
             response = openai.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."},
-                    {"role": "user", "content": f"Improve the following Python code for better readability, efficiency, and compliance with PEP8 standards:\n\n{code}"}
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Improve the following Python code for better readability, efficiency, and compliance with PEP8 standards:\n\n{code}"
+                    }
                 ],
                 temperature=0.7,
                 max_tokens=1500,
@@ -75,22 +87,25 @@ class CodeImprover:
             if file_content.type == "dir":
                 contents.extend(self.repo.get_contents(file_content.path))
             elif file_content.path.endswith('.py'):
-                if file_content.size > 1_000_000:
-                    file_content = self.repo.get_contents(file_content.path, ref=default_branch)
-
-                decoded_content = base64.b64decode(file_content.content).decode('utf-8')
-                improved_code = self.improve_code(decoded_content)
-
-                if improved_code:
-                    element = InputGitTreeElement(
-                        path=file_content.path,
-                        mode='100644',
-                        type='blob',
-                        content=improved_code
-                    )
-                    element_list.append(element)
+                element_list.extend(self._process_python_file(file_content, default_branch))
 
         return element_list
+
+    def _process_python_file(self, file_content, default_branch):
+        if file_content.size > 1_000_000:
+            file_content = self.repo.get_contents(file_content.path, ref=default_branch)
+
+        decoded_content = base64.b64decode(file_content.content).decode('utf-8')
+        improved_code = self.improve_code(decoded_content)
+
+        if improved_code:
+            return [InputGitTreeElement(
+                path=file_content.path,
+                mode='100644',
+                type='blob',
+                content=improved_code
+            )]
+        return []
 
     def commit_changes(self, element_list, new_branch_name, sb):
         if element_list:
@@ -99,7 +114,7 @@ class CodeImprover:
             parent = self.repo.get_git_commit(sb.commit.sha)
             commit_message = 'Automated code improvements using GPT-4'
             commit = self.repo.create_git_commit(commit_message, tree, [parent])
-            self.repo.get_git_ref('heads/' + new_branch_name).edit(commit.sha)
+            self.repo.get_git_ref(f'heads/{new_branch_name}').edit(commit.sha)
 
             # Create a Pull Request
             pr = self.repo.create_pull(
@@ -118,6 +133,6 @@ class CodeImprover:
         self.commit_changes(element_list, new_branch_name, sb)
 
 if __name__ == "__main__":
-    CodeImprover()
-    # code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
-    # code_improver.run()
+    code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
+    code_improver.run()
+```
