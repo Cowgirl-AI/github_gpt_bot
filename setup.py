@@ -1,8 +1,6 @@
 from setuptools import setup, find_packages
 import os
 
-# Utility function to read the requirements.txt file
-
 
 def read_requirements():
     requirements_path = "requirements.txt"
@@ -11,11 +9,17 @@ def read_requirements():
             return req.read().splitlines()
     return []
 
+
+def read_long_description():
+    with open("README.md") as readme:
+        return readme.read()
+
+
 setup(
     name="cgai-gh-bot",
     version="0.0.1",
     description="Cowgirl AI Github GPT Bot",
-    long_description=open("README.md").read(),
+    long_description=read_long_description(),
     long_description_content_type="text/markdown",
     url="https://github.com/Cowgirl-AI/github_gpt_bot",
     author="Tera Earlywine",
@@ -26,7 +30,6 @@ setup(
     python_requires=">=3.10",
     entry_points={
         "console_scripts": [
-            # command=folder.script_name.main       # example
             "cgai-gh=cli.main:main",
         ],
     },

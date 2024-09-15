@@ -1,59 +1,60 @@
-from dotenv import load_dotenv
-from github import Github, InputGitTreeElement, GithubException
-import os
-import openai
 import base64
 import datetime
 import logging
+import os
 
-# Configure logging
+from dotenv import load_dotenv
+from github import Github, InputGitTreeElement, GithubException
+import openai
+
 logging.basicConfig(level=logging.INFO)
 
+
 class CodeImprover:
-    def __init__(self, repo_name):
+    def __init__(self, repo_name: str):
         load_dotenv()
         self.github_token = os.getenv('GITHUB_TOKEN')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.repo_name = repo_name
 
-        # Validate environment variables
         assert self.github_token, "GITHUB_TOKEN must be set as an environment variable."
         assert self.openai_api_key, "OPENAI_API_KEY must be set as an environment variable."
 
-        # Authenticate with GitHub
         self.github = Github(self.github_token)
-        self.repo = self.authenticate_repo()
+        self.repo = self._authenticate_repo()
 
-        # Authenticate with OpenAI
         openai.api_key = self.openai_api_key
 
-    def authenticate_repo(self):
+    def _authenticate_repo(self):
         try:
             repo = self.github.get_repo(self.repo_name)
             logging.info(f"Authenticated to repository: {repo.full_name}")
             return repo
         except GithubException as e:
-            if e.status == 401:
-                logging.error("Authentication failed: Bad credentials. Please check your GITHUB_TOKEN.")
-            elif e.status == 403:
-                logging.error("Access forbidden: You do not have the necessary permissions.")
-            elif e.status == 404:
-                logging.error("Repository not found: Please check the repository name and your permissions.")
-            else:
-                logging.error(f"An error occurred: {e.data['message']}")
+            self._handle_github_exception(e)
             raise
 
+    @staticmethod
+    def _handle_github_exception(exception: GithubException):
+        if exception.status == 401:
+            logging.error("Authentication failed: Bad credentials. Please check your GITHUB_TOKEN.")
+        elif exception.status == 403:
+            logging.error("Access forbidden: You do not have the necessary permissions.")
+        elif exception.status == 404:
+            logging.error("Repository not found: Please check the repository name and your permissions.")
+        else:
+            logging.error(f"An error occurred: {exception.data['message']}")
 
     def create_branch(self):
         default_branch = self.repo.default_branch
         new_branch_name = f'code-improvements-{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}'
         sb = self.repo.get_branch(default_branch)
-        self.repo.create_git_ref(ref='refs/heads/' + new_branch_name, sha=sb.commit.sha)
+        self.repo.create_git_ref(ref=f'refs/heads/{new_branch_name}', sha=sb.commit.sha)
         return new_branch_name, sb
 
-    def improve_code(self, code):
+    def improve_code(self, code: str):
         try:
-            response = openai.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."},
@@ -62,7 +63,7 @@ class CodeImprover:
                 temperature=0.7,
                 max_tokens=1500,
             )
-            return response.choices[0].message.content.strip()
+            return response.choices[0].message['content'].strip()
         except Exception as e:
             logging.error(f"Error during OpenAI API call: {e}")
             return None
@@ -93,31 +94,31 @@ class CodeImprover:
         return element_list
 
     def commit_changes(self, element_list, new_branch_name, sb):
-        if element_list:
-            base_tree = self.repo.get_git_tree(sb.commit.sha)
-            tree = self.repo.create_git_tree(element_list, base_tree)
-            parent = self.repo.get_git_commit(sb.commit.sha)
-            commit_message = 'Automated code improvements using GPT-4'
-            commit = self.repo.create_git_commit(commit_message, tree, [parent])
-            self.repo.get_git_ref('heads/' + new_branch_name).edit(commit.sha)
-
-            # Create a Pull Request
-            pr = self.repo.create_pull(
-                title='Automated Code Improvements',
-                body='This PR includes code improvements made by GPT-4.',
-                head=new_branch_name,
-                base=self.repo.default_branch
-            )
-            logging.info(f'Pull Request created: {pr.html_url}')
-        else:
+        if not element_list:
             logging.info('No Python files found to improve.')
+            return
+
+        base_tree = self.repo.get_git_tree(sb.commit.sha)
+        tree = self.repo.create_git_tree(element_list, base_tree)
+        parent = self.repo.get_git_commit(sb.commit.sha)
+        commit_message = 'Automated code improvements using GPT-4'
+        commit = self.repo.create_git_commit(commit_message, tree, [parent])
+        self.repo.get_git_ref(f'heads/{new_branch_name}').edit(commit.sha)
+
+        pr = self.repo.create_pull(
+            title='Automated Code Improvements',
+            body='This PR includes code improvements made by GPT-4.',
+            head=new_branch_name,
+            base=self.repo.default_branch
+        )
+        logging.info(f'Pull Request created: {pr.html_url}')
 
     def run(self):
         new_branch_name, sb = self.create_branch()
         element_list = self.process_files(self.repo.default_branch, new_branch_name, sb)
         self.commit_changes(element_list, new_branch_name, sb)
 
+
 if __name__ == "__main__":
-    CodeImprover()
-    # code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
-    # code_improver.run()
+    code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
+    code_improver.run()
