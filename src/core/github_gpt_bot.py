@@ -9,19 +9,25 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
+# Load environment variables from .env file
+load_dotenv()
+
 class CodeImprover:
     def __init__(self, repo_name):
-        load_dotenv()
-        self.github_token = os.getenv('GITHUB_TOKEN')
-        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.gh_token = os.getenv("GITHUB_TOKEN")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.repo_name = repo_name
 
         # Validate environment variables
-        assert self.github_token, "GITHUB_TOKEN must be set as an environment variable."
+        assert self.gh_token, "GITHUB_TOKEN must be set as an environment variable."
         assert self.openai_api_key, "OPENAI_API_KEY must be set as an environment variable."
 
+        # Debugging: Check token lengths (do not print tokens)
+        logging.info(f"GITHUB_TOKEN length: {len(self.gh_token)}")
+        logging.info(f"OPENAI_API_KEY length: {len(self.openai_api_key)}")
+
         # Authenticate with GitHub
-        self.github = Github(self.github_token)
+        self.g = Github(self.gh_token)
         self.repo = self.authenticate_repo()
 
         # Authenticate with OpenAI
@@ -29,7 +35,7 @@ class CodeImprover:
 
     def authenticate_repo(self):
         try:
-            repo = self.github.get_repo(self.repo_name)
+            repo = self.g.get_repo(self.repo_name)
             logging.info(f"Authenticated to repository: {repo.full_name}")
             return repo
         except GithubException as e:
@@ -54,9 +60,9 @@ class CodeImprover:
     def improve_code(self, code):
         try:
             response = openai.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."},
+                    {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself, if no code found -- skip."},
                     {"role": "user", "content": f"Improve the following Python code for better readability, efficiency, and compliance with PEP8 standards:\n\n{code}"}
                 ],
                 temperature=0.7,
@@ -119,5 +125,5 @@ class CodeImprover:
 
 if __name__ == "__main__":
     CodeImprover()
-    # code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
+    # code_improver = CodeImprover('Cowgirl-AI/github_gpt_bot')
     # code_improver.run()
