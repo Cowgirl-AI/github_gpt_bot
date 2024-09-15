@@ -1,124 +1,123 @@
 from dotenv import load_dotenv
 from github import Github, InputGitTreeElement, GithubException
+import os
+import openai
 import base64
 import datetime
 import logging
-import os
-import openai
 
-load_dotenv()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
-logging.basicConfig(level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+class CodeImprover:
+    def __init__(self, repo_name):
+        load_dotenv()
+        self.github_token = "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"
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.repo_name = repo_name
 
-class AutoUpdate: 
-    """
-    AutoUpdate 
-    ----------
-    Class to handle automatically updating and refining code in a Github repository, taking advantage of GPT.
-    Authenticate processes with the OpenAI API and Github API
-    """
+        # Validate environment variables
+        assert self.github_token, "GITHUB_TOKEN must be set as an environment variable."
+        assert self.openai_api_key, "OPENAI_API_KEY must be set as an environment variable."
 
-    def __init__(self, repository_name: str, repository_owner: str):
-        self.repository_name = repository_name
-        self.repository_owner = repository_owner
+        # Authenticate with GitHub
+        self.github = Github(self.github_token)
+        self.repo = self.authenticate_repo()
 
-        self.github = Github(os.getenv('GITHUB_TOKEN'))
-        openai.api_key = os.getenv('OPENAI_API_KEY')
-        self.repo = self.github.get_repo(f'{self.repository_owner}/{self.repository_name}')
-        self.default_branch = self.repo.default_branch
-        self.sb = self.repo.get_branch(self.default_branch)
-        self.new_branch_name = self._init_new_branch()
-        assert self._is_github_auth_successful(), "GitHub authentication failed."
+        # Authenticate with OpenAI
+        openai.api_key = self.openai_api_key
 
-    def _is_github_auth_successful(self):
+    def authenticate_repo(self):
         try:
-            self.github.get_user().login
-            logging.info(f"Authenticated with Github as {self.github.get_user().login}")
-            return True
+            repo = self.github.get_repo(self.repo_name)
+            logging.info(f"Authenticated to repository: {repo.full_name}")
+            return repo
         except GithubException as e:
-            logging.error(f"Github authentication failed: {e}")
-            return False
-        
-    
-    def _init_new_branch(self):
-        # Create a new branch with a timestamp
+            if e.status == 401:
+                logging.error("Authentication failed: Bad credentials. Please check your GITHUB_TOKEN.")
+            elif e.status == 403:
+                logging.error("Access forbidden: You do not have the necessary permissions.")
+            elif e.status == 404:
+                logging.error("Repository not found: Please check the repository name and your permissions.")
+            else:
+                logging.error(f"An error occurred: {e.data['message']}")
+            raise
+
+
+    def create_branch(self):
+        default_branch = self.repo.default_branch
         new_branch_name = f'code-improvements-{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}'
-        self.repo.create_git_ref(ref='refs/heads/' + new_branch_name, sha=self.sb.commit.sha)
-        logging.info(f"Initialized new branch: {new_branch_name}")
-        return new_branch_name
+        sb = self.repo.get_branch(default_branch)
+        self.repo.create_git_ref(ref='refs/heads/' + new_branch_name, sha=sb.commit.sha)
+        return new_branch_name, sb
 
-    def send_to_gpt(self, file_content, decoded_content):
-        # Send code to GPT for improvement
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."},
-                {"role": "user", "content": f"Improve the following Python code for better readability, efficiency, and compliance with PEP8 standards:\n\n{decoded_content}"}
-            ],
-            temperature=0.7,
-            max_tokens=1500,
-        )
+    def improve_code(self, code):
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that improves Python code quality. Only return the code itself."},
+                    {"role": "user", "content": f"Improve the following Python code for better readability, efficiency, and compliance with PEP8 standards:\n\n{code}"}
+                ],
+                temperature=0.7,
+                max_tokens=1500,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logging.error(f"Error during OpenAI API call: {e}")
+            return None
 
-        return response.choices[0].message.content.strip()
-
-    
-    def repo_file_search(self):
-        # List to hold updated files
+    def process_files(self, default_branch, new_branch_name, sb):
         element_list = []
-
-        # Iterate over files in the repository
-        contents = self.repo.get_contents("", ref=self.default_branch)
+        contents = self.repo.get_contents("", ref=default_branch)
         while contents:
             file_content = contents.pop(0)
             if file_content.type == "dir":
                 contents.extend(self.repo.get_contents(file_content.path))
-
             elif file_content.path.endswith('.py'):
-                # For large files, fetch content properly
                 if file_content.size > 1_000_000:
-                    file_content = self.repo.get_contents(file_content.path, ref=self.default_branch)
-                
-                # Decode file content
-                decoded_content = base64.b64decode(file_content.content).decode('utf-8')
-                improved_code = self.send_to_gpt(file_content, decoded_content)
+                    file_content = self.repo.get_contents(file_content.path, ref=default_branch)
 
-                # Prepare the updated file for commit
-                element = InputGitTreeElement(
-                    path=file_content.path,
-                    mode='100644',
-                    type='blob',
-                    content=improved_code
-                )
-                element_list.append(element)
-                logging.info(f"Improved file: {file_content.path}")
+                decoded_content = base64.b64decode(file_content.content).decode('utf-8')
+                improved_code = self.improve_code(decoded_content)
+
+                if improved_code:
+                    element = InputGitTreeElement(
+                        path=file_content.path,
+                        mode='100644',
+                        type='blob',
+                        content=improved_code
+                    )
+                    element_list.append(element)
+
         return element_list
-    
-    def commit_changes(self, element_list):
+
+    def commit_changes(self, element_list, new_branch_name, sb):
         if element_list:
-            base_tree = self.repo.get_git_tree(self.sb.commit.sha)
+            base_tree = self.repo.get_git_tree(sb.commit.sha)
             tree = self.repo.create_git_tree(element_list, base_tree)
-            parent = self.repo.get_git_commit(self.sb.commit.sha)
+            parent = self.repo.get_git_commit(sb.commit.sha)
             commit_message = 'Automated code improvements using GPT-4'
             commit = self.repo.create_git_commit(commit_message, tree, [parent])
-            self.repo.get_git_ref('heads/' + self.new_branch_name).edit(commit.sha)
+            self.repo.get_git_ref('heads/' + new_branch_name).edit(commit.sha)
 
             # Create a Pull Request
             pr = self.repo.create_pull(
                 title='Automated Code Improvements',
                 body='This PR includes code improvements made by GPT-4.',
-                head=self.new_branch_name,
-                base=self.default_branch
+                head=new_branch_name,
+                base=self.repo.default_branch
             )
             logging.info(f'Pull Request created: {pr.html_url}')
         else:
             logging.info('No Python files found to improve.')
 
-if __name__ == "__main__":
-    auto_update = AutoUpdate(repository_name='teraearlywine', repository_owner='teraearlywine')
-    updated_files = auto_update.repo_file_search()
-    auto_update.commit_changes(updated_files)
+    def run(self):
+        new_branch_name, sb = self.create_branch()
+        element_list = self.process_files(self.repo.default_branch, new_branch_name, sb)
+        self.commit_changes(element_list, new_branch_name, sb)
 
-# Improvements made:
-# - Added assertions for GitHub authentication.
-# - Added logging for branch initialization and file improvements.
-# - Wrapped the execution in a main guard to allow for module import without execution.
+if __name__ == "__main__":
+    CodeImprover()
+    # code_improver = CodeImprover('Cowgirl-AI/cgai-landing-page')
+    # code_improver.run()
